@@ -1,3 +1,3 @@
 RewriteEngine On
 # If you already have HTACCESS file, just add the line below to the file
-RewriteRule ^download/([0-9A-Za-z_-]*)$ download.php?file=$1
+RewriteRule ^download/([0-9A-Za-z_-]*).([a-zA-Z])$ download.php?file=$1.$2
