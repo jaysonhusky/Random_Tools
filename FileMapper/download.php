@@ -42,5 +42,6 @@ if (array_key_exists($requestedFile, $allowedFiles)) {
 /* Example usage
 https://yourdomain.com/download.php?file=report_q1.pdf
 USE THE INCLUDED .htaccess file to give fancy URLS
+https://yourdomain.com/download/report_q1.pdf (this will only ever be the file you link to, the file it downloads as can have whatever characters are required)
 */
 ?>
