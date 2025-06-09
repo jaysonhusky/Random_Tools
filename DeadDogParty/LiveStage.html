@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+        <title>LiveStage</title>
+        <style>
+            body, html {
+                margin: 0;
+                padding: 0;
+                height: 100%;
+                overflow: hidden;
+                background-color: black;
+                font-family: sans-serif;
+                perspective: 1000px;
+            }
+            .disco {
+                width: 100%;
+                height: 100%;
+                position: relative;
+                display: flex;
+                flex-direction: column;
+                justify-content: flex-end;
+                align-items: center;
+                transform-style: preserve-3d;
+            }
+            .lights, .spotlight, .disco-ball, .floor {
+                position: absolute;
+                z-index: 1;
+            }
+            .lights {
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: radial-gradient(circle, white 10%, transparent 70%) center/10% 10% repeat;
+                opacity: 0.3;
+                pointer-events: none;
+            }
+            .spotlight {
+                top: -50%;
+                left: -50%;
+                width: 200%;
+                height: 200%;
+                background: conic-gradient(from 0deg, rgba(255,255,255,0.1), transparent 30%, transparent 70%, rgba(255,255,255,0.1));
+                animation: spin 5s linear infinite;
+                pointer-events: none;
+            }
+            .disco-ball {
+                top: 50px;
+                left: 50%;
+                transform: translateX(-50%);
+                width: 80px;
+                height: 80px;
+                background: radial-gradient(circle, silver 30%, gray 70%);
+                border-radius: 50%;
+                box-shadow: 0 0 20px white;
+                animation: rotateBall 4s linear infinite;
+                z-index: 2;
+            }
+            .disco-ball::before {
+                content: '';
+                position: absolute;
+                width: 100%;
+                height: 100%;
+                background-image: repeating-linear-gradient(45deg, #ccc, #ccc 4px, #888 4px, #888 8px);
+                border-radius: 50%;
+                opacity: 0.4;
+            }
+            .floor {
+                bottom: 0;
+                width: 100%;
+                display: grid;
+                grid-template-columns: repeat(16, 1fr);
+                grid-template-rows: repeat(8, 1fr);
+                height: 50%;
+                transform: rotateX(60deg) translateZ(-200px);
+                transform-origin: bottom;
+                z-index: 0;
+                gap: 2px;
+            }
+            .tile {
+                width: 100%;
+                height: 100%;
+                background-color: #111;
+                transition: background-color 0.1s, transform 0.1s;
+                box-shadow: inset 0 0 10px #000;
+                transform-style: preserve-3d;
+            }
+            .tile.jump {
+                transform: translateZ(30px);
+            }
+            @keyframes spin {
+                0% {
+                    transform: rotate(0deg);
+                }
+                100% {
+                    transform: rotate(360deg);
+                }
+            }
+            @keyframes rotateBall {
+                0% {
+                    transform: translateX(-50%) rotate(0deg);
+                }
+                100% {
+                    transform: translateX(-50%) rotate(360deg);
+                }
+            }
+            audio {
+                display: none;
+            }
+            #startButton {
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                padding: 1em 2em;
+                font-size: 1.2em;
+                background: #222;
+                color: white;
+                border: none;
+                cursor: pointer;
+                z-index: 10;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="disco" id="disco">
+            <div class="spotlight"></div>
+            <div class="lights" id="lights"></div>
+            <div class="disco-ball" id="ball"></div>
+            <div class="floor" id="floor"></div>
+            <audio id="music" src="audio.mp3" controls autoplay loop></audio>
+        </div>
+        <canvas id="laserCanvas" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:5;"></canvas>
+        <button id="startButton">Start Visualizer</button>
+        <script>
+            const disco = document.getElementById('disco');
+            const lights = document.getElementById('lights');
+            const ball = document.getElementById('ball');
+            const floor = document.getElementById('floor');
+            const music = document.getElementById('music');
+            const cols = 16;
+            const rows = 8;
+            const tileCount = cols * rows;
+            for (let i = 0; i < tileCount; i++) {
+                const tile = document.createElement('div');
+                tile.classList.add('tile');
+                floor.appendChild(tile);
+            }
+            const tiles = document.querySelectorAll('.tile');
+            const laserCanvas = document.getElementById('laserCanvas');
+            const laserCtx = laserCanvas.getContext('2d');
+            function resizeCanvas() {
+                laserCanvas.width = window.innerWidth;
+                laserCanvas.height = window.innerHeight;
+            }
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            // Audio setup
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const analyser = audioCtx.createAnalyser();
+            const source = audioCtx.createMediaElementSource(music);
+            source.connect(analyser);
+            analyser.connect(audioCtx.destination);
+            analyser.fftSize = 256;
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            // Beat detection
+            let lastBeatTime = 0;
+            const beatThreshold = 180;
+            const beatDelay = 300;
+            // ms
+            function getAverage(arr, start, end) {
+                let sum = 0;
+                for (let i = start; i <= end; i++)
+                    sum += arr[i];
+                return sum / (end - start + 1);
+            }
+            function animate() {
+                analyser.getByteFrequencyData(dataArray);
+                const bass = getAverage(dataArray, 0, 5);
+                const mids = getAverage(dataArray, 6, 30);
+                const highs = getAverage(dataArray, 31, bufferLength - 1);
+                // Debug log - remove in production
+                //console.log('Bass:', bass.toFixed(1), 'Highs:', highs.toFixed(1));
+                const now = Date.now();
+                // Beat detection using bass
+                if (bass > beatThreshold && now - lastBeatTime > beatDelay) {
+                    triggerBeat();
+                    lastBeatTime = now;
+                }
+                // LED pixel shimmer
+                tiles.forEach( (tile, i) => {
+                    const noise = Math.sin((i + now / 100) * 0.2) * 0.5 + 0.5;
+                    const color = `hsl(${(bass + i * 3) % 360}, 100%, ${30 + noise * 30}%)`;
+                    tile.style.backgroundColor = color;
+                }
+                );
+                // Flash lights on high freqs - smoother opacity
+                //lights.style.opacity = Math.min(highs / 255, 0.8).toFixed(2);
+                lights.style.backgroundColor = `hsl(${currentHue}, 100%, 50%)`;
+                lights.style.opacity = Math.min(highs / 255, 0.8).toFixed(2);
+                ball.style.boxShadow = `0 0 ${bass}px white`;
+                function drawLasers() {
+                    laserCtx.clearRect(0, 0, laserCanvas.width, laserCanvas.height);
+                    const now = Date.now();
+                    const bassNormalized = Math.min(bass / 255, 1);
+                    const laserLength = 500;
+                    const maxLaserWidth = 8;
+                    // Positions for top-left and top-right corners
+                    const corners = [{
+                        x: 0,
+                        y: 0,
+                        angleStart: Math.PI / 4
+                    }, // 45° down-right
+                    {
+                        x: laserCanvas.width,
+                        y: 0,
+                        angleStart: (3 * Math.PI) / 4
+                    }// 135° down-left
+                    ];
+                    corners.forEach( (corner, i) => {
+                        // Fire count (number of laser beams per corner)
+                        const beams = 3;
+                        for (let j = 0; j < beams; j++) {
+                            // Spread beams slightly around base angle with a small offset
+                            const angle = corner.angleStart + (j - 1) * 0.05 + Math.sin(now / 300 + j) * 0.02;
+                            // Laser length pulses with bass (scale 0.5 to 1.5)
+                            const length = laserLength * (0.5 + bassNormalized);
+                            // Laser brightness (opacity)
+                            const brightness = bassNormalized * (0.5 + Math.sin(now / 100 + j) * 0.5);
+                            laserCtx.strokeStyle = `hsla(${(i * 180 + j * 30 + now / 10) % 360}, 100%, 70%, ${brightness.toFixed(2)})`;
+                            laserCtx.lineWidth = maxLaserWidth * brightness;
+                            laserCtx.shadowColor = `hsla(${(i * 180 + j * 30 + now / 10) % 360}, 100%, 80%, ${brightness.toFixed(2)})`;
+                            laserCtx.shadowBlur = 25;
+                            laserCtx.beginPath();
+                            laserCtx.moveTo(corner.x, corner.y);
+                            laserCtx.lineTo(corner.x + length * Math.cos(angle), corner.y + length * Math.sin(angle));
+                            laserCtx.stroke();
+                        }
+                    }
+                    );
+                }
+                drawLasers();
+                requestAnimationFrame(animate);
+            }
+            let currentHue = 0;
+            function triggerBeat() {
+                currentHue = Math.floor(Math.random() * 360);
+                tiles.forEach(tile => {
+                    tile.classList.add('jump');
+                    setTimeout( () => tile.classList.remove('jump'), 150);
+                }
+                );
+            }
+            // Remove music.onplay listener to avoid duplicate animate calls
+            // music.onplay = () => {
+            //   audioCtx.resume();
+            //   animate();
+            // };
+            const startBtn = document.getElementById('startButton');
+            if (startBtn) {
+                startBtn.addEventListener('click', () => {
+                    audioCtx.resume().then( () => {
+                        music.play();
+                        startBtn.style.display = 'none';
+                        animate();
+                        // start animation loop only once here
+                    }
+                    );
+                }
+                );
+            } else {
+                // Fallback: start automatically on page load (may be blocked)
+                audioCtx.resume().then( () => {
+                    music.play();
+                    animate();
+                }
+                );
+            }
+        </script>
+    </body>
+</html>
